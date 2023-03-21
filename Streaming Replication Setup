@@ -1,0 +1,219 @@
+#########################   PostgreSQL Streaming Replication Steps   #############################  
+								     High-Availability 
+							======================================
+
+Postgresql Installation Version 	: 12, 13, 14 or above
+Supported Linux OS version			: RHEL/CentOS 7 or above, 
+									  Debian 9 or above, 
+									  Ubuntu 18 or above 
+
+Postgresql master database server	: 10.20.70.1       ( READ / WRITE )
+Postgresql standby database server	: 10.20.70.2       ( READ ONLY )
+
+
+Mount Point	: /p01
+Data Path 	: /p01/data
+
+
+[root@10.20.70.1 /p01]# ls -ltr
+total 8
+drwxrwxrwx  6     1107     1107 4096 Nov  7 12:12 postgresql-14.1
+drwxr-xr-x  6 root     root       56 Nov  7 12:20 PostgreSQL
+drwx------ 19 postgres postgres 4096 Nov  7 13:47 data
+drwxr-xr-x  2 postgres postgres    6 Nov  7 14:04 logs
+
+
+
+
+
+##### Step 1: Configuring the PostgreSQL Master/Primary Database Server  (MASTER)
+----------------------------------------------------------------------------------
+
+-- 1. On the master server, switch to the postgres system account and configure the IP address(es) on which the master server will listen to for connections from clients.
+
+[postgres@10.20.70.1 ~]$ psql -c "ALTER SYSTEM SET listen_addresses TO '*';"
+ALTER SYSTEM
+
+
+-- 2. Then create a replication role that will be used for connections from the standby server to the master server, using the createuser program. 
+--    In the following command, the -P flag prompts for a password for the new role and -e echoes the commands that createuser generates and sends to the database server.
+
+[postgres@10.20.70.1 ~]$ psql
+psql (14.1)
+Type "help" for help.
+
+postgres=# CREATE USER replicator WITH REPLICATION ENCRYPTED PASSWORD 'rep@123';
+CREATE ROLE
+postgres=#
+
+postgres=# show config_file;
+        config_file
+----------------------------
+ /p01/data/postgresql.conf
+(1 row)
+
+postgres=# exit;
+
+[postgres@10.20.70.1 ~]$ cd /p01/data/
+
+
+-- 3. Then enter the following entry at the end of the /p01/data/pg_hba.conf client authentication
+
+[postgres@10.20.70.1 data]$ vi pg_hba.conf  		-- (add at the end)
+host    replication     replicator      10.20.70.2/24        trust or md5 or password  
+
+     
+-- 4. Now restart the Postgres service
+
+[postgres@10.20.70.1 ~]$ pg_ctl -D /p01/data stop     <OR>  systemctl restart postgresql-13.service
+waiting for server to shut down.... done
+server stopped
+
+
+[postgres@10.20.70.1 ~]$ pg_ctl -D /p01/data -l /p01/logs/pg_ctl.log start
+waiting for server to start.... done
+server started
+
+
+##### Step 2: Making a Base Backup to Bootstrap the Standby Server (SLAVE)
+--------------------------------------------------------------------------
+
+-- 5. Next, you need to make a base backup of the master server from the standby server; this helps to bootstrap the standby server
+
+[postgres@10.20.70.2 ~]$ pg_ctl -D /p01/data stop
+waiting for server to shut down.... done
+server stopped
+
+[postgres@10.20.70.2 ~]$ cd /p01
+
+[postgres@10.20.70.2 p01]$ mkdir old_data
+[postgres@10.20.70.2 p01]$ cp -rf data/ old_data/
+[postgres@10.20.70.2 data]$ \rm -rf *
+[postgres@10.20.70.2 data]$ ls
+[postgres@10.20.70.2 data]$
+
+
+-- 6. Then use the pg_basebackup tool to take the base backup with the right ownership 
+(the database system user i.e Postgres, within the Postgres user account) and with the right permissions.
+
+pg_basebackup -h 10.20.70.1 -U replicator -p 5432 -D /p01/data -P -v -R -X stream -C -S pgstandby1
+
+-- it will not ask password, because we gave 'trust' in pg_hba.conf settings in master node
+-- pgstandby1 is a slot name
+
+[postgres@10.20.70.2 data]$ pg_basebackup -h 10.20.70.1 -U replicator -p 5432 -D /p01/data -P -v -R -X stream -C -S pgstandby1      
+pg_basebackup: initiating base backup, waiting for checkpoint to complete
+pg_basebackup: checkpoint completed
+pg_basebackup: write-ahead log start point: 2/78000028 on timeline 1
+pg_basebackup: starting background WAL receiver
+pg_basebackup: created replication slot "pgstandby1"
+12713926/12713926 kB (100%), 1/1 tablespace
+pg_basebackup: write-ahead log end point: 2/78000138
+pg_basebackup: waiting for background process to finish streaming ...
+pg_basebackup: syncing data to disk ...
+pg_basebackup: renaming backup_manifest.tmp to backup_manifest
+pg_basebackup: base backup completed
+
+
+-- 7. When the backup process is done, the new data directory on the standby server should look like that in the screenshot. 
+--	  A standby.signal is created and the connection settings are appended to postgresql.auto.conf.
+
+[postgres@10.20.70.2 data]$ ls
+backup_label     pg_commit_ts   pg_logical    pg_serial     pg_subtrans  pg_wal                standby.signal
+backup_manifest  pg_dynshmem    pg_multixact  pg_snapshots  pg_tblspc    pg_xact
+base             pg_hba.conf    pg_notify     pg_stat       pg_twophase  postgresql.auto.conf
+global           pg_ident.conf  pg_replslot   pg_stat_tmp   PG_VERSION   postgresql.conf
+
+	** A replication slave will run in “Hot Standby” mode if the hot_standby parameter is set to on (the default value) in postgresql.conf 
+	   and there is a standby.signal file present in the data directory.
+
+
+##### Step 3:  (MASTER)
+-----------------------
+			   
+-- 8. Now back on the master server, you should be able to see the replication slot called pgstandby1   
+--    when you open the pg_replication_slots view as follows.
+
+[postgres@10.20.70.1 data]$ psql -c "SELECT * FROM pg_replication_slots;"
+
+[postgres@10.20.70.1 data]$ psql -c "SELECT * FROM pg_replication_slots;"
+ slot_name  | plugin | slot_type | datoid | database | temporary | active | active_pid | xmin | catalog_xmin | restart_lsn | confirmed_flush_lsn | wal_status | safe_wal_size
+------------+--------+-----------+--------+----------+-----------+--------+------------+------+--------------+-------------+---------------------+------------+---------------
+ pgstandby1 |        | physical  |        |          | f         | f      |            |      |              | 2/78000000  |                     | reserved   |
+(1 row)
+
+
+###### Step 4: (SLAVE)
+----------------------
+
+-- 9. To view the connection settings appended in the postgresql.auto.conf file, use the cat command.
+
+[postgres@10.20.70.2 data]$ cat postgresql.auto.conf
+# Do not edit this file manually!
+# It will be overwritten by the ALTER SYSTEM command.
+listen_addresses = '*'
+primary_conninfo = 'user=replicator passfile=''/home/postgres/.pgpass'' channel_binding=disable host=10.20.70.1 port=5432 sslmode=disable sslcompression=0 ssl_min_protocol_version=TLSv1.2 gssencmode=disable krbsrvname=postgres target_session_attrs=any'
+primary_slot_name = 'pgstandby1'
+
+
+-- 10. Now commence normal database operations on the standby server by starting the PostgreSQL service as follows.
+
+[postgres@10.20.70.2 data]$ pg_ctl -D /p01/data -l /p01/logs/pg_ctl.log start
+waiting for server to start.... done
+server started
+
+
+###### Step 5:  Check Replication "status" in both MASTER and SLAVE node
+------------------------------------------------------------------------
+
+-- Check At MASTER node
+
+[postgres@10.20.70.1 data]$ psql -x -c "select * from pg_stat_replication"
+-[ RECORD 1 ]----+---------------------------------
+pid              | 19077
+usesysid         | 16384
+usename          | replicator
+application_name | walreceiver
+client_addr      | 10.20.70.2
+client_hostname  |
+client_port      | 39714
+backend_start    | 2022-11-07 17:38:38.37143+05:30
+backend_xmin     |
+state            | streaming
+sent_lsn         | 2/79000148
+write_lsn        | 2/79000148
+flush_lsn        | 2/79000148
+replay_lsn       | 2/79000148
+write_lag        |
+flush_lag        |
+replay_lag       |
+sync_priority    | 0
+sync_state       | async
+reply_time       | 2022-11-07 17:41:28.749229+05:30
+
+
+-- Check At SLAVE node
+
+[postgres@10.20.70.2 data]$ psql -c "\x" -c "SELECT * FROM pg_stat_wal_receiver;"
+Expanded display is on.
+-[ RECORD 1 ]---------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pid                   | 14617
+status                | streaming
+receive_start_lsn     | 2/79000000
+receive_start_tli     | 1
+written_lsn           | 2/79000148
+flushed_lsn           | 2/79000148
+received_tli          | 1
+last_msg_send_time    | 2022-11-07 17:42:08.828022+05:30
+last_msg_receipt_time | 2022-11-07 17:42:08.827395+05:30
+latest_end_lsn        | 2/79000148
+latest_end_time       | 2022-11-07 17:38:38.373966+05:30
+slot_name             | pgstandby1
+sender_host           | 10.20.70.1
+sender_port           | 5432
+conninfo              | user=replicator passfile=/home/postgres/.pgpass channel_binding=disable dbname=replication host=10.20.70.1 port=5432 fallback_application_name=walreceiver sslmode=disable sslcompression=0 ssl_min_protocol_version=TLSv1.2 gssencmode=disable krbsrvname=postgres target_session_attrs=any
+
+
+
+
+############################ END ############################
