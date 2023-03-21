@@ -1,11 +1,11 @@
 #########################   PostgreSQL Streaming Replication Steps   #############################  
-								     High-Availability 
-							======================================
+				 High-Availability 
+			======================================
 
 Postgresql Installation Version 	: 12, 13, 14 or above
-Supported Linux OS version			: RHEL/CentOS 7 or above, 
-									  Debian 9 or above, 
-									  Ubuntu 18 or above 
+Supported Linux OS version		: RHEL/CentOS 7 or above, 
+					  Debian 9 or above, 
+					  Ubuntu 18 or above 
 
 Postgresql master database server	: 10.20.70.1       ( READ / WRITE )
 Postgresql standby database server	: 10.20.70.2       ( READ ONLY )
