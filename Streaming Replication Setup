@@ -31,7 +31,7 @@ drwxr-xr-x  2 postgres postgres    6 Nov  7 14:04 logs
 
 -- 1. On the master server, switch to the postgres system account and configure the IP address(es) on which the master server will listen to for connections from clients.
 
-[postgres@10.20.70.1 ~]$ psql -c "ALTER SYSTEM SET listen_addresses TO '*';"
+[postgres@10.20.70.1 ~]$ `psql -c "ALTER SYSTEM SET listen_addresses TO '*';"`
 ALTER SYSTEM
 
 
@@ -42,11 +42,11 @@ ALTER SYSTEM
 psql (14.1)
 Type "help" for help.
 
-postgres=# CREATE USER replicator WITH REPLICATION ENCRYPTED PASSWORD 'rep@123';
+postgres=# `CREATE USER replicator WITH REPLICATION ENCRYPTED PASSWORD 'rep@123';`
 CREATE ROLE
 postgres=#
 
-postgres=# show config_file;
+postgres=# `show config_file;`
         config_file
 ----------------------------
  /p01/data/postgresql.conf
@@ -134,9 +134,9 @@ global           pg_ident.conf  pg_replslot   pg_stat_tmp   PG_VERSION   postgre
 -- 8. Now back on the master server, you should be able to see the replication slot called pgstandby1   
 --    when you open the pg_replication_slots view as follows.
 
-[postgres@10.20.70.1 data]$ psql -c "SELECT * FROM pg_replication_slots;"
+[postgres@10.20.70.1 data]$ `psql -c "SELECT * FROM pg_replication_slots;"`
 
-[postgres@10.20.70.1 data]$ psql -c "SELECT * FROM pg_replication_slots;"
+[postgres@10.20.70.1 data]$ `psql -c "SELECT * FROM pg_replication_slots;"`
  slot_name  | plugin | slot_type | datoid | database | temporary | active | active_pid | xmin | catalog_xmin | restart_lsn | confirmed_flush_lsn | wal_status | safe_wal_size
 ------------+--------+-----------+--------+----------+-----------+--------+------------+------+--------------+-------------+---------------------+------------+---------------
  pgstandby1 |        | physical  |        |          | f         | f      |            |      |              | 2/78000000  |                     | reserved   |
@@ -168,7 +168,7 @@ server started
 
 -- Check At MASTER node
 
-[postgres@10.20.70.1 data]$ psql -x -c "select * from pg_stat_replication"
+[postgres@10.20.70.1 data]$ `psql -x -c "select * from pg_stat_replication";`
 -[ RECORD 1 ]----+---------------------------------
 pid              | 19077
 usesysid         | 16384
